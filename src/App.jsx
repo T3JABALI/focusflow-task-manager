@@ -1,43 +1,129 @@
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import './App.css';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
 function App() {
-  const [tasks, setTasks] = useState([
-    { id: 1, title: 'Learn React', completed: false },
-    { id: 2, title: 'Build my first website', completed: false },
-  ]);
-
+  const [tasks, setTasks] = useState([]);
   const [newTask, setNewTask] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  function addTask(event) {
+  // Load saved tasks from the backend when the page opens
+  useEffect(() => {
+    async function loadTasks() {
+      try {
+        const response = await fetch(`${API_URL}/api/tasks`);
+
+        if (!response.ok) {
+          throw new Error('Could not load tasks.');
+        }
+
+        const data = await response.json();
+        setTasks(data);
+      } catch (err) {
+        setError(
+          'Could not connect to the server. Make sure your backend is running.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadTasks();
+  }, []);
+
+  // Add a task and save it to the database
+  async function addTask(event) {
     event.preventDefault();
 
-    if (newTask.trim() === '') return;
+    const title = newTask.trim();
+    if (!title) return;
 
-    const task = {
-      id: Date.now(),
-      title: newTask.trim(),
-      completed: false,
-    };
+    setError('');
 
-    setTasks([...tasks, task]);
-    setNewTask('');
+    try {
+      const response = await fetch(`${API_URL}/api/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Could not add task.');
+      }
+
+      const savedTask = await response.json();
+      setTasks((currentTasks) => [savedTask, ...currentTasks]);
+      setNewTask('');
+    } catch (err) {
+      setError('Could not save your task. Please try again.');
+    }
   }
 
-  function toggleTask(id) {
-    setTasks(
-      tasks.map((task) =>
-        task.id === id
-          ? { ...task, completed: !task.completed }
-          : task
-      )
-    );
+  // Update task completion in the database
+  async function toggleTask(id) {
+    const task = tasks.find((item) => item.id === id);
+    if (!task) return;
+
+    setError('');
+
+    try {
+      const response = await fetch(`${API_URL}/api/tasks/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ completed: !task.completed }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Could not update task.');
+      }
+
+      const updatedTask = await response.json();
+
+      setTasks((currentTasks) =>
+        currentTasks.map((item) =>
+          item.id === id ? updatedTask : item
+        )
+      );
+    } catch (err) {
+      setError('Could not update the task. Please try again.');
+    }
   }
 
-  function deleteTask(id) {
-    setTasks(tasks.filter((task) => task.id !== id));
+  // Delete a task from the database
+  async function deleteTask(id) {
+    setError('');
+
+    try {
+      const response = await fetch(`${API_URL}/api/tasks/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Could not delete task.');
+      }
+
+      setTasks((currentTasks) =>
+        currentTasks.filter((task) => task.id !== id)
+      );
+    } catch (err) {
+      setError('Could not delete the task. Please try again.');
+    }
   }
+
+  const completedCount = tasks.filter(
+    (task) => task.completed
+  ).length;
+
+  const progress = tasks.length
+    ? (completedCount / tasks.length) * 100
+    : 0;
 
   return (
     <main className="app">
@@ -59,9 +145,7 @@ function App() {
           <div>
             <h2>My tasks</h2>
             <p>
-              {tasks.filter((task) => task.completed).length}
-              {' of '}
-              {tasks.length} completed
+              {completedCount} of {tasks.length} completed
             </p>
           </div>
           <span className="task-count">{tasks.length}</span>
@@ -70,14 +154,7 @@ function App() {
         <div className="progress-track">
           <div
             className="progress-fill"
-            style={{
-              width: `${
-                tasks.length
-                  ? (tasks.filter((task) => task.completed).length /
-                      tasks.length) * 100
-                  : 0
-              }%`,
-            }}
+            style={{ width: `${progress}%` }}
           />
         </div>
 
@@ -88,11 +165,21 @@ function App() {
             value={newTask}
             onChange={(event) => setNewTask(event.target.value)}
           />
-          <button type="submit">+ Add task</button>
+          <button type="submit" disabled={loading}>
+            + Add task
+          </button>
         </form>
 
+        {error && (
+          <p role="alert" style={{ color: 'crimson' }}>
+            {error}
+          </p>
+        )}
+
         <div className="task-list">
-          {tasks.length === 0 ? (
+          {loading ? (
+            <p className="empty-state">Loading your tasks...</p>
+          ) : tasks.length === 0 ? (
             <p className="empty-state">
               No tasks yet. Add one to get started!
             </p>
@@ -110,7 +197,9 @@ function App() {
 
                 <span
                   className={
-                    task.completed ? 'task-title completed' : 'task-title'
+                    task.completed
+                      ? 'task-title completed'
+                      : 'task-title'
                   }
                 >
                   {task.title}
